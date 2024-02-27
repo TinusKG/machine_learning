@@ -1,0 +1,219 @@
+---
+title: "assignment3"
+format: html
+editor: visual
+---
+
+## Data
+
+```{r}
+load("C:/Users/tinus/OneDrive/Desktop/Machine Learning/Assignment3/PopPyrISO.Rdata")
+
+plot.PopPyrISO <- function(Prop.M.F, label=NULL, col=NULL,
+                           col.Male=col, col.Female=col){
+  Prop.M.F <- as.numeric(Prop.M.F)
+  n.ages <- length(Prop.M.F)/2
+  barplot(-Prop.M.F[1:n.ages], horiz = TRUE, 
+          main=label, col=col.Male,
+          xlab="   Male  -  Female",
+          xlim=c(-1,1)*max(Prop.M.F))
+  barplot(Prop.M.F[n.ages+(1:n.ages)], horiz = TRUE, 
+          col=col.Female, add=TRUE)
+}
+
+n <- dim(PopPyrISO)[1]
+op <- par(mfrow=c(2,3))
+for (j in sample(n,6))
+   plot.PopPyrISO(PopPyrISO[j,(6:47)],PopPyrISO$English.short.name[j])
+par(op)
+```
+
+## 1
+
+```{r}
+# weighted L1 norm
+w.L1 <- function(pop.pyr,alpha=1){
+  n<- dim(pop.pyr)[1]
+  D.42 <- matrix(0,nrow=n,ncol=n)
+  w.age <- apply(pop.pyr,2,mean)^alpha
+  w.age <- as.numeric(w.age/sum(w.age))
+  A <- as.matrix(pop.pyr)
+  as.dist(
+    abs( matrix(rep(A,n),nrow=n) -
+         matrix(rep(as.numeric(t(A)),n),nrow=n,byrow=TRUE) 
+        ) %*% kronecker(diag(n),w.age)
+    )
+}
+D.42 <- w.L1(PopPyrISO[,6:47],alpha=1)
+
+```
+
+## 1.a
+
+```{r}
+hcl.ward <- hclust(D.42,method="ward.D")
+#plot(hcl.ward,labels = PopPyrISO$English.short.name)
+plot(hcl.ward,asp=1)
+```
+
+```{r}
+library(cluster)
+hcl.ward <- hclust(D.42,method="ward.D")
+silhouette_values = c(NA)
+
+for (k in 2:10) {
+  cut <- cutree(hcl.ward,k)
+  sil <- silhouette(cut, D.42)
+  silhouette_values <- append(silhouette_values,mean(sil[,3]))
+}
+# Best silhouette value k
+k <- which.max(silhouette_values)
+```
+
+Some comment about the result
+
+## 1.b
+
+```{r}
+# Plot of the chosen k
+cut <- cutree(hcl.ward,k)
+sil <- silhouette(cut, D.42)
+plot(sil,col=2:(k+1))
+```
+
+Another comment about the result
+
+## 1.c
+
+```{r}
+# Create empty data frame to store values, one row for each cluster
+pop_mean_dist <- data.frame()
+for (k in 1:max(cut)) {
+  pop_mean_dist <- rbind(pop_mean_dist,rep(0,42))
+}
+
+# Iterate through all countries and sum each column depending on their belonging cluster
+for (i in 1:length(cut)) {
+  pop_mean_dist[cut[i],] <- pop_mean_dist[cut[i],] + PopPyrISO[i,(6:47)]
+}
+
+# Average the result by the number of elements in each cluster
+for (k in 1:max(cut)) {
+  pop_mean_dist[k,] <- pop_mean_dist[k,]/sum(cut==k)
+}
+
+# Plot the result
+for (k in 1:max(cut)) {
+  plot.PopPyrISO(pop_mean_dist[k,],paste("Cluster: ",toString(k)))
+}
+```
+
+## 1.d
+
+```{r}
+plot_world <- function(Cluster_Indicator,
+                       ISO.3.code=PopPyrISO$Alpha.3.code){
+  library(maps)
+  # Country names in the data base 'world', 
+  # from library maps, of each country in 
+  # the data.frame used to do clusters
+  country.names.world <- iso.expand(ISO.3.code)
+  # assigning polygons in "world" to each country
+  country.to.map <- match.map("world",country.names.world)
+  
+  ncolors <- length(unique(Cluster_Indicator))
+  x <- hcl.k.star[country.to.map]
+  # with a color palette
+  #color <- terrain.colors(n=ncolors)
+  color <- palette.colors(n = ncolors, 
+                          palette = "pastel 1")
+  map("world", fill = TRUE, col = color[x]) 
+  map("world", add = TRUE) # plot again borders
+  legend("bottomleft",paste("Cluster",1:ncolors),
+         fill=color[1:ncolors],cex=1,
+         border=0,bty="o",box.col=0)
+}
+
+hcl.k.star <- cut
+plot_world(cut)
+```
+
+## 2
+
+## 2.a
+
+```{r}
+pca <- princomp(PopPyrISO[,(6:47)])
+summary(pca)
+biplot(pca,asp=1)
+```
+
+```{r}
+# About 99% of the variance is accounted for in the first 10 components
+propOfVar <- pca$sdev^2/sum(pca$sdev^2)
+cumPropOfVar <- sum(propOfVar[1:10])
+print(cumPropOfVar)
+```
+
+## 2.b
+
+```{r}
+# Plot of PC scores
+plot(pca$scores[,1],pca$scores[,2],asp=1)
+plot(pca$scores[,1],pca$scores[,3],asp=1)
+plot(pca$scores[,1],pca$scores[,4],asp=1)
+```
+
+The first and second principal component appear dependent on one another. If they are dependent, one could argue that dimensionality reduction is justified.
+
+## 2.c
+
+```{r}
+# Population pyramids for the first four PC
+for (k in 1:4) {
+  plot.PopPyrISO(pca$loadings[,k],paste("PC",toString(k)),col.Male=3,col.Female=4)
+}
+```
+
+## 2.d
+
+```{r}
+## Confusing question. Asked professor if he could clarify
+```
+
+## 3
+
+```{r}
+require(flexmix)
+aux <- flexmix::KLdiv(t(PopPyrISO[,6:47]),method="discrete")
+D.KL <- as.dist( (aux+t(aux))/2)
+```
+
+## 3.a
+
+```{r}
+out <- cmdscale(D.KL,k=2,eig=TRUE)
+# Not sure about this
+plot(out$eig)
+out$GOF
+```
+
+## 3.b
+
+```{r}
+
+```
+
+## 3.c
+
+```{r}
+plot(out$points)
+```
+
+## 3.d
+
+```{r}
+
+```
+
+## 
