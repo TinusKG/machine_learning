@@ -178,7 +178,53 @@ for (k in 1:4) {
 ## 2.d
 
 ```{r}
-## Confusing question. Asked professor if he could clarify
+
+# Interpreting the j-th PC with graphics of the form
+#     mean +/- cte.j * PC_j
+
+k <- 4 # four principal components
+
+op<-par(mfrow=c(2,4))
+pca.mean <- pca$center
+for (j in 1:k) {
+  plot(pca$loadings[,j],ylab="")
+  title(paste("PC ",j,"; %VE=",col=3))
+  
+  cte.j <- quantile(abs(pca$scores[,j]),.9)
+  plot(pca.mean - cte.j * pca$loadings[,j],,ylab="")
+  title(paste("mean - cte.j * PC",j))
+  
+  plot(pca.mean)
+  title("mean")
+  
+  plot(pca.mean + cte.j * pca$loadings[,j],,ylab="")
+  title(paste("mean + cte.j * PC",j))
+}
+```
+
+## 2.e
+
+Interpretation from 2.b, 2.c and 2.d of the first 2 PC's
+
+## 2.f
+
+```{r}
+# Approximation of an observation by the first k PCs:
+# X_i \approx \bar{X} + \sum_{j=1}^k \psi_{ij} PC_j
+
+i <- which(PopPyrISO$English.short.name=='Norway')
+
+
+op<-par(mfrow=c(2,2))
+
+
+approx.zip.i <- pca.mean
+
+for (j in 1:k){
+  approx.zip.i <- approx.zip.i + pca$scores[i,j]*pca$loadings[,j]
+  plot(approx.zip.i)
+  title(paste("Up tp PC ",j))
+}
 ```
 
 ## 3
@@ -193,27 +239,49 @@ D.KL <- as.dist( (aux+t(aux))/2)
 
 ```{r}
 out <- cmdscale(D.KL,k=2,eig=TRUE)
-# Not sure about this
-plot(out$eig)
 out$GOF
+plot(out$eig)
 ```
 
 ## 3.b
 
 ```{r}
-
+# Computing the GOF in %
+print("Goodness of fit")
+print(out$GOF*100)
 ```
 
 ## 3.c
 
 ```{r}
 plot(out$points)
+text(out$points,labels=PopPyrISO$English.short.name)
 ```
 
 ## 3.d
 
 ```{r}
-
+# This is wrong
+quant1 <- quantile(out$points[,1],probs = c(0.1,0.5,0.9))
+quant2 <- quantile(out$points[,2],probs = c(0.1,0.5,0.9))
+quants <-cbind(quant1,quant2)
+print(quants)
+op<-par(mfrow=c(2,3))
+for (k in 1:2) {
+  q1 <- which(out$points[,k] <= quants[1,k])
+  q2 <- which(out$points[,k] <= quants[2,k])
+  q3 <- which(out$points[,k] <= quants[3,k])
+  plot.PopPyrISO(PopPyrISO[q1[1],(6:47)])
+  title(paste("Dim:",k,", Q1"))
+  plot.PopPyrISO(PopPyrISO[q2[1],(6:47)])
+  title(paste("Dim:",k,", Q2"))
+  plot.PopPyrISO(PopPyrISO[q3[1],(6:47)])
+  title(paste("Dim:",k,", Q3"))
+}
 ```
 
-## 
+## 3.e
+
+```{r}
+?dist
+```
