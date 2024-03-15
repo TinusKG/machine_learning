@@ -1,0 +1,343 @@
+---
+title: "assignment4"
+format: html
+editor: visual
+---
+
+## Part A. Principal Curves
+
+### 1. Choosing smoothing parameter in principal curves
+
+```{r}
+library(plot3D)
+
+t <- seq(-1.5*pi,1.5*pi,l=100)
+R<- 1
+n<-75
+sd.eps <- .15
+
+set.seed(1)
+y <- R*sign(t) - R*sign(t)*cos(t/R)
+x <- -R*sin(t/R)
+z <- (y/(2*R))^2
+rt <- sort(runif(n)*3*pi - 1.5*pi)
+eps <- rnorm(n)*sd.eps
+ry <- R*sign(rt) - (R+eps)*sign(rt)*cos(rt/R)
+rx <- -(R+eps)*sin(rt/R)
+rz <- (ry/(2*R))^2 + runif(n,min=-2*sd.eps,max=2*sd.eps)
+XYZ <- cbind(rx,ry,rz)
+
+lines3D(x,y,z,colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=2,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz))
+points3D(rx,ry,rz,col=4,pch=19,cex=.6,add=TRUE)
+```
+
+```{r}
+library("princurve")
+
+# Computes the LOOCV of a principal curve as a function of the number of degrees of freedom 
+loocv_princurve <- function(x,dof) {
+  n <- length(x[,1])
+  MSE <- rep(0,n)
+  curve <- principal_curve(x,df = dof)
+  for (i in 1:n) {
+    proj_comp_i <- project_to_curve(x[-i,],curve$s)
+    MSE[i] <- proj_comp_i$dist
+  }
+  return(mean(MSE))
+}
+```
+
+### a
+
+```{r}
+dof <- seq(2,8,by=1)
+loocv <- rep(0,length(dof))
+
+for (k in dof) {
+  loocv[k-1] <- loocv_princurve(XYZ,k)
+}
+
+plot(dof,loocv,xlab="degrees of freedom",ylab="LOOCV")
+```
+
+```{r}
+# This appears to do the same?
+dof <- seq(2,8,by=1)
+loocv <- rep(0,length(dof))
+
+for (k in dof) {
+  curve <- principal_curve(XYZ,df = k)
+  proj <- project_to_curve(XYZ,curve$s)
+  loocv[k-1] <- proj$dist
+}
+
+plot(dof,loocv,xlab="degrees of freedom",ylab="LOOCV")
+```
+
+### b
+
+```{r}
+min.df <- which.min(loocv) + 1
+
+curve <- principal_curve(XYZ,df = min.df)
+
+sx <- curve$s[,1]
+sy <- curve$s[,2]
+sz <- curve$s[,3]
+
+lines3D(x,y,z,colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=2,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz))
+lines3D(sx,sy,sz,colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=2,lwd=2,as=1,
+xlim=range(sx),ylim=range(sy),zlim=range(sz))
+points3D(sx,sy,sz,col="black",pch=16,cex=0.8,add=TRUE)
+```
+
+The curve resembles the original curve, although the end points, as well as the middle point do not seem coincide perfectly with the original one.
+
+### c
+
+```{r}
+curve <- principal_curve(XYZ,df = 50)
+proj <- project_to_curve(XYZ,curve$s)
+
+loocv.50 <- proj$dist
+loocv.min <- min(loocv)
+
+print(paste("LOOCV for df = ",min.df," is ",loocv.min))
+print(paste("LOOCV for df = ",50," is ",loocv.50))
+```
+
+Obviously the LOOCV for df = 50 is a lot smaller than for df = 6. As long as it does not cause too long runtimes, I would prefer df = 50 as the LOOCV is a lot smaller. However, if the model is going to be used for example in prediction, it might be too overfitted to the data.
+
+```{r}
+curve <- principal_curve(XYZ,df = 50)
+
+kx <- curve$s[,1]
+ky <- curve$s[,2]
+kz <- curve$s[,3]
+
+lines3D(kx,ky,kz,colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=2,lwd=2,as=1,
+xlim=range(kx),ylim=range(ky),zlim=range(kz))
+points3D(kx,ky,kz,col="black",pch=16,cex=0.8,add=TRUE)
+```
+
+Obviously, the data is highly overfitted. I would rather prefer df = 6.
+
+Since the df = 50 is almost the same as the number of entries in our data (n = 75), the principal curve will almost perfectly intersect the data points in XYZ. Thus, applying LOOCV will yield small errors, even when we leave out data points.
+
+## Part B. Local MDS, ISOMAP and t-SNE
+
+```{r}
+# Loading data and functions
+zip.train <- read.table("zip.train")
+I.0 <- (zip.train[,1]==0)
+zip.0 <- zip.train[I.0,]
+n<-dim(zip.0)[1]
+
+# ploting 1 digit
+plot.zip <- function(x,use.first=FALSE,...){
+  x<-as.numeric(x)
+  if (use.first){
+    x.mat <- matrix(x,16,16)
+  }
+  else{
+    x.mat <- matrix(x[-1],16,16)
+  }
+  image(1:16,1:16,x.mat[,16:1],
+        col=gray(seq(1,0,l=12)),...)
+  invisible(
+    if (!use.first){
+      title(x[1])
+    }else{
+    }
+  )
+}
+
+# Routine to choose 9 indexes ...
+choose_points <- function(X) {
+  clusters <- kmeans(X,centers = 9)
+  n <- length(X[,1])
+  m <- length(clusters$centers[,1])
+  e_dist <- rep(NA,n)
+  indexes <- rep(NA,m)
+  for (j in 1:m) {
+    for (i in 1:n) {
+      e_dist[i] <- sqrt((X[i,1]-clusters$centers[j,1])^2 + (X[i,2]-clusters$centers[j,2])^2)
+      }
+    indexes[j] <- which.min(e_dist)
+    }
+  return(indexes)
+}
+
+# Local continuity meta criteria function
+LCMC <- function(D1,D2,Kp){
+  D1 <- as.matrix(D1)
+  D2 <- as.matrix(D2)
+  n <- dim(D1)[1]
+  N.Kp.i <- numeric(n)
+  for (i in 1:n){
+    N1.i <- sort.int(D1[i,],index.return = TRUE)$ix[1:Kp]
+    N2.i <- sort.int(D2[i,],index.return = TRUE)$ix[1:Kp]
+    N.Kp.i[i] <- length(intersect(N1.i, N2.i))
+  }
+  N.Kp<-mean(N.Kp.i)
+  M.Kp.adj <- N.Kp/Kp - Kp/(n-1)
+  
+  return(list(N.Kp.i=N.Kp.i, M.Kp.adj=M.Kp.adj))
+}
+```
+
+### 2. Local MDS for ZERO digits
+
+```{r}
+#library(stops)
+# help(lmds)
+```
+
+### a
+
+### b
+
+### c
+
+### 3. ISOMAP for ZERO digits
+
+### a
+
+```{r}
+# Plotting the ISOMAP
+library("vegan")
+
+dis <-dist(zip.0)
+iso_mod <- isomap(dis,ndim=2, k=5)
+plot(iso_mod$points,xlab = "Dim 1", ylab = "Dim 2",asp=1)
+```
+
+### b
+
+```{r}
+# Selecting 9 points
+ind_ISO <- choose_points(iso_mod$points)
+
+plot(iso_mod$points,col="gray",xlab = "Dim 1", ylab = "Dim 2",asp=1)
+points(iso_mod$points[ind_ISO,],pch = c("1","2","3","4","5","6","7","8","9"),col = "red")
+```
+
+```{r}
+# Plotting the images corresponding to the 9 points
+op <- par(mfrow = c(3,3))
+for (j in 1:length(ind_ISO)) {
+  plot.zip(zip.0[ind_ISO[j],])
+  title(paste("Number ",j))
+}
+```
+
+### c
+
+```{r}
+# Using LCMC to find the optimal k for ISOMAP
+D1 <- dis
+q <- 2
+Kp <- 10
+k_values <- c(5,10,50)
+m <- length(k_values)
+
+LC_ISO <- rep(NA,m)
+ISOMAP.k <- vector("list",m)
+
+for (i in 1:m){
+  ISOMAP.k[[i]] <- isomap(D1, ndim=q, 
+                            k= k_values[i])
+  D2.k <- dist(ISOMAP.k[[i]]$points[,1:q])
+  LC_ISO[i] <- LCMC(D1,D2.k,Kp)$M.Kp.adj
+}
+
+i.max.ISO <- which.max(LC_ISO)
+k.max.ISO <- k_values[i.max.ISO]
+ISOMAP.max <- ISOMAP.k[[i.max.ISO]]
+```
+
+```{r}
+plot(k_values, LC_ISO, type="b", main=paste0("K.max=",round(k.max.ISO,4)))
+abline(v=k.max.ISO,col=2)
+```
+
+```{r}
+plot(ISOMAP.max,xlab = "Dim 1", ylab = "Dim 2")
+```
+
+### 4. t-SNE for ZERO digits
+
+### a
+
+```{r}
+library("Rtsne")
+
+mod_tsne <- Rtsne(dis,dims = 2, perplexity = 40, theta = 0)
+plot(mod_tsne$Y,xlab = "Dim 1", ylab = "Dim 2",asp=1) 
+```
+
+### b
+
+```{r}
+ind_RTSNE <- choose_points(mod_tsne$Y)
+
+plot(mod_tsne$Y,col="gray",xlab = "Dim 1", ylab = "Dim 2",asp=1)
+points(mod_tsne$Y[ind_RTSNE,],pch = c("1","2","3","4","5","6","7","8","9"),col = "blue")
+```
+
+```{r}
+inc_dim1_RTSNE <- ind_RTSNE[c(7,2,5,9,1,4,3,6,8)]
+inc_dim2_RTSNE <- ind_RTSNE[c(4,8,1,6,5,3,9,2,7)]
+
+# Plotting the images corresponding to the 9 points
+op <- par(mfrow = c(1,1))
+for (j in 1:length(ind_RTSNE)) {
+  plot.zip(zip.0[inc_dim1_RTSNE[j],])
+  title(paste("Number ",j))
+}
+```
+
+### c
+
+```{r}
+perp_values <- c(10,20,40)
+l <- length(perp_values)
+
+LC_RTSNE <- rep(NA,l)
+RTSNE.perp <- vector("list",l)
+
+for (i in 1:l){
+  RTSNE.perp[[i]] <- Rtsne(dis, dims=q, perplexity = perp_values[i], theta = 0)
+  D2.perp <- dist(RTSNE.perp[[i]]$Y[,1:q])
+  LC_RTSNE[i] <- LCMC(D1,D2.perp,Kp)$M.Kp.adj
+}
+
+i.max.RTSNE <- which.max(LC_RTSNE)
+perp.max.RTSNE <- perp_values[i.max.RTSNE]
+RTSNE.perp.max <- RTSNE.perp[[i.max.RTSNE]]
+```
+
+```{r}
+plot(perp_values, LC_RTSNE, type="b", main=paste0("perp.max=",round(perp.max.RTSNE,4)))
+abline(v=perp.max.RTSNE,col=2)
+```
+
+```{r}
+plot(RTSNE.perp.max$Y,xlab = "Dim 1", ylab = "Dim 2",asp=1)
+```
+
+### 5. Comparison: Local MDS, ISOMAP and t-SNE for ZERO digits
+
+### a
+
+### b
