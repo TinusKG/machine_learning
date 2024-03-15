@@ -1,0 +1,252 @@
+---
+title: "Assignment: Non-Linear Dimensionality Reduction"
+author: "Henrik Grenersen"
+date: "2024-03-10"
+output: html_document
+---
+
+```{r}
+#install.packages("princurve")
+library(princurve)
+library(ggplot2)
+library(tidyverse)
+library(plotly)
+
+setwd("C:\\Users\\47980\\OneDrive - NTNU\\Documents\\FYSMAT\\Fjerde\\Spring\\Machine Learning\\Part 1\\Exercises\\Exercise 4")
+```
+
+# Part A. Principal Curves
+
+## 1) Choosing the Smoothing Parameter in Principal Curves
+
+```{r}
+t <- seq(-1.5*pi,1.5*pi,l=100)
+R<- 1
+n<-75
+sd.eps <- .15
+set.seed(1)
+y <- R*sign(t)- R*sign(t)*cos(t/R)
+x <--R*sin(t/R)
+z <- (y/(2*R))^2
+rt <- sort(runif(n)*3*pi- 1.5*pi)
+eps <- rnorm(n)*sd.eps
+ry <- R*sign(rt)- (R+eps)*sign(rt)*cos(rt/R)
+rx <--(R+eps)*sin(rt/R)
+rz <- (ry/(2*R))^2 + runif(n,min=-2*sd.eps,max=2*sd.eps)
+XYZ <- cbind(rx,ry,rz)
+require(plot3D)
+lines3D(x,y,z,colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=3,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz), main="Generating Curve and Points")
+points3D(rx,ry,rz,col=4,pch=19,cex=.6,add=TRUE)
+
+?princurve::principal_curve
+```
+
+### a) Cross-Validation for Degrees of Freedom
+
+```{r}
+?project_to_curve
+LOOCV<-rep(0, 7)
+for(df in 2:8){
+  for(i in 1:n){
+    curve<-principal_curve(x=XYZ[-i, ], df=df)
+    LOOCV[df-1]<-LOOCV[df-1]+project_to_curve(matrix(XYZ[i, ], ncol=3),curve$s[curve$ord,])$dist
+  }
+}
+
+ggplot(tibble(df=2:8, LOOCV=LOOCV), aes(x=df, y=LOOCV))+geom_point()+geom_line()+ggtitle("Sum of Distances for LOOCV")
+```
+
+We note that according to LOOCV we should choose our degrees of freedom equal to $6$.
+
+### b) Plotting the Best Principal Curve
+
+```{r}
+best_curve<-principal_curve(XYZ, df=6)
+
+coords<-best_curve$s
+
+lines3D(coords[, 1], coords[, 2], coords[,3], colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=2,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz), main="Principal Curve with df=6 in Red\nGreen:Generating Curve")
+lines3D(x,y,z,colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=3,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz), add=TRUE)
+```
+
+## c) Weaknesses of LOOCV
+
+```{r}
+LOOCV_50<-0
+for(i in 1:n){
+    curve<-principal_curve(x=XYZ[-i, ], df=50)
+    LOOCV_50<-LOOCV_50+project_to_curve(matrix(XYZ[i, ], ncol=3),curve$s[curve$ord,])$dist
+}
+LOOCV_50
+LOOCV
+```
+
+We see that the value for the LOOCV when `df=50`, given in the R output above, is smaller than that obtained for `df`$=6$, which was `r min(LOOCV)`.
+
+Based only on the LOOCV values, one could argue that `df=50` is the optimal value for the degrees of freedom. 
+
+We now fit the principal curves for our two candidate degrees of freedom, i.e. $6$ and $50$, and present a 3D plot of the curves together with the points.
+```{r}
+fifty_curve<-principal_curve(XYZ, df=50)
+
+fifty_coords<-fifty_curve$s
+
+lines3D(coords[, 1], coords[, 2], coords[,3], colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=2,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz), main="Principal Curve with df=6 in Red\nGreen: Generating Curve\nBlue: PC with df=50")
+lines3D(fifty_coords[, 1], fifty_coords[, 2], fifty_coords[,3],colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=4,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz), add=TRUE)
+lines3D(x, y, z,colvar = NULL,
+phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+col=3,lwd=4,as=1,
+xlim=range(rx),ylim=range(ry),zlim=range(rz), add=TRUE)
+points3D(rx,ry,rz,col=4,pch=19,cex=.6,add=TRUE)
+```
+
+We would prefer the curve corresponding to `df=6`, as this has a general shape close to the true generating curve, and avoids overfitting. 
+
+`df=50` might have given such a good value for the LOOCV because of its high flexibility. When removing a point, we will get splines that interpolate very many of the remaining points, and if the removed point is close to one of the others, which has most likely been interpolated, the distance from the left out point to the resulting curve will be small.
+
+# Part B Local MDS, ISOMAP and t-SNE
+
+```{r}
+training_data<-read.table("train.txt")
+
+plot.zip <- function(x,use.first=FALSE,...){
+  x<-as.numeric(x)
+  if (use.first){
+    x.mat <- matrix(x,16,16)
+  }else{
+    x.mat <- matrix(x[-1],16,16)
+  }
+  image(1:16,1:16,x.mat[,16:1],
+  col=gray(seq(1,0,l=12)),...)
+  invisible(
+    if (!use.first){
+    title(x[1])
+    }else{
+}
+)
+ #col=gray(seq(1,0,l=2)))
+}
+
+zeros<-which(training_data[, 1]==0)
+
+zeros_data<-training_data[zeros, ]
+
+plot.zip(zeros_data[1,])
+```
+
+
+
+## Problem 2
+
+```{r}
+if (!require(stops, quietly=TRUE, warn.conflicts=FALSE)){
+ install.packages("stops", repos="http://R-Forge.R-project.org",INSTALL_opts="--no-test-load")
+ }
+library(stops)
+```
+
+### a) 2-dimensional configuration with `lmds`
+
+```{r}
+install.packages("rJava")
+
+
+```
+
+## 3. ISOMAP for Zero Digits
+
+```{r}
+library(vegan)
+
+?isomap
+q<-2
+iso_mod<-isomap(dist(zeros_data),k=5, ndim=q)
+
+df<-data.frame(dim1=iso_mod$points[, "Dim1"], 
+               dim2=iso_mod$points[, "Dim2"], 
+               interesting=rep(0, nrow(zeros_data)))
+
+interesting_points<-c("2209", "6659", "3422", "2040", "6989", "3672",
+                      "1757", "6890", "6591")
+#Description: Lower right
+#Far to the left
+#Top, a bit to the left
+#Top, a bit to the right
+#Top, even more to the right
+#Almost top, to the right
+df[interesting_points, "interesting"]=1
+
+iso_plot<-ggplot(data=df, aes(x=dim1, y=dim2, color=interesting))+geom_point()+ggtitle("2-Dimensional Configuration with ISOMAP")+geom_text(aes(label=rownames(df)))+theme(legend.position = "none")
+
+iso_plot
+ggplotly(iso_plot)
+```
+
+### b) Interpretation of Coordinates
+
+```{r}
+op <- par(mfrow=c(3,3))
+apply(zeros_data[interesting_points,],1,plot.zip)
+```
+
+### c) Local Continuity Meta Criteria for Tuning
+
+```{r}
+LCMC <- function(D1,D2,Kp){
+  D1 <- as.matrix(D1)
+  D2 <- as.matrix(D2)
+  n <- dim(D1)[1]
+  N.Kp.i <- numeric(n)
+  for (i in 1:n){
+    N1.i <- sort.int(D1[i,],index.return = TRUE)$ix[1:Kp]
+    N2.i <- sort.int(D2[i,],index.return = TRUE)$ix[1:Kp]
+    N.Kp.i[i] <- length(intersect(N1.i, N2.i))
+  }
+  N.Kp<-mean(N.Kp.i)
+  M.Kp.adj <- N.Kp/Kp - Kp/(n-1)
+  
+  return(list(N.Kp.i=N.Kp.i, M.Kp.adj=M.Kp.adj))
+}
+
+v.k<-c(5:50)
+
+LC <- numeric(length(v.k))
+ISOMAP.ks <- vector("list",length(v.k))
+
+D1<-dist(zeros_data)
+for (i in 1:length(v.k)){
+  ISOMAP.ks[[i]] <- isomap(D1, ndim=q, 
+                            k= v.k[i])
+  D2.ks <- dist(ISOMAP.ks[[i]]$points[,1:q])
+  LC[i] <- LCMC(D1,D2.ks,v.k[i])$M.Kp.adj
+  #print(c(i,j,LC[i,j]))
+}
+ggplot(tibble(k=v.k, LC=LC), aes(x=k, y=LC))+geom_point()
+```
+
+
+
+
+
+
+
+
+
+
+
+
