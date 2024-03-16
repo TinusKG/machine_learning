@@ -1,0 +1,522 @@
+---
+title: "ML_4"
+format: html
+editor: visual
+---
+
+# Non-linear dimensionality reduction.
+Elliot Källander, Hannes Björck, Henrik Grenersen, Tinus Garshol
+
+## 1. Choosing the smoothing parameter in Principal Curves
+
+###loading libs
+```{r, include=FALSE}
+library(plot3D)
+library(princurve)
+```
+
+
+### initialization 
+```{r}
+
+t <- seq(-1.5*pi,1.5*pi,l=100)
+R<- 1
+n<-75
+sd.eps <- .15
+
+set.seed(1)
+y <- R*sign(t) - R*sign(t)*cos(t/R)
+x <- -R*sin(t/R)
+z <- (y/(2*R))^2
+rt <- sort(runif(n)*3*pi - 1.5*pi)
+eps <- rnorm(n)*sd.eps
+ry <- R*sign(rt) - (R+eps)*sign(rt)*cos(rt/R)
+rx <- -(R+eps)*sin(rt/R)
+rz <- (ry/(2*R))^2 + runif(n,min=-2*sd.eps,max=2*sd.eps)
+XYZ <- cbind(rx,ry,rz)
+
+
+
+lines3D(x,y,z,colvar = NULL, 
+         phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+         col=2,lwd=4,as=1,
+         xlim=range(rx),ylim=range(ry),zlim=range(rz))
+points3D(rx,ry,rz,col=4,pch=19,cex=.6,add=TRUE)
+
+```
+## Part A
+## 1
+###a
+Choose the value of the degrees of freedom df by leave-one-out cross-validation.
+
+Restrict the search of df to seq(2,8,by=1).
+(Hint: The function project_to_curve should be used. See the element dist of the object it returns).
+
+```{r}
+df_seq <- seq(2,8,by=1)
+ 
+tot_dist <- vector(mode = "logical", length(df_seq))
+
+for (df_e in df_seq){
+  dist <- 0
+  for (point in 1:dim(XYZ)[1]){
+    prin_curve <- principal_curve(XYZ[-point,],   df=df_e,smoother="smooth_spline")
+    dist <- dist + project_to_curve(x=XYZ, s=prin_curve$s)$dist
+  }
+  tot_dist[df_e-1] <- dist
+}
+tot_dist
+best_df <- 6 # similar distance as 6 df
+best_df
+```
+### b
+Give a graphical representation of the principal curve output for the optimal df and comment on the obtained results.
+
+```{r}
+prin_curve_opt <- principal_curve(XYZ, df=best_df,smoother="smooth_spline")
+
+#plot(prin_curve_opt)
+lines3D(prin_curve_opt$s[,"rx"],prin_curve_opt$s[,"ry"],prin_curve_opt$s[,"rz"],colvar = NULL, 
+         phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+         col=2,lwd=4,as=1,
+         xlim=range(rx),ylim=range(ry),zlim=range(rz))
+```
+
+
+### c
+Compute the leave-one-out cross-validation for df=50 and compare it with the result corresponding to the optimal df value you found before.
+
+c.1 
+Before fitting the principal curve with df=50 and based only on the leave-one-out cross-validation values, what value for df do you think that is better, the previous optimal one or df=50?
+
+I think df=50 will have a better distance but that the curve will be overfitted and bounce between points.
+
+c.2
+Fit now the principal curve with df=50 and plot the fitted curve in the 3D scatterplot of the original points.
+
+```{r}
+
+prin_curve <- principal_curve(XYZ, df=50,smoother="smooth_spline")
+
+#plot(prin_curve_opt)
+lines3D(prin_curve$s[,"rx"],prin_curve$s[,"ry"],prin_curve$s[,"rz"],colvar = NULL, 
+         phi = 20, theta = 60, r =sqrt(3), d =3, scale=FALSE,
+         col=2,lwd=4,as=1,
+         xlim=range(rx),ylim=range(ry),zlim=range(rz))
+
+points3D(rx,ry,rz,col=4,pch=19,cex=.6,add=TRUE)
+```
+
+c.3
+Now, what value of df do you prefer?
+
+I prefer df=6 as it is has a good fit whlie not being overfitted.
+
+
+c.4
+The overfitting with df=50 is clear. Nevertheless leave-one-out cross-validation has not been able to detect this fact. Why do you think that df=50 is given a so good value of leave-one-out cross-validation?
+
+```{r}
+dist <- 0
+  for (point in 1:dim(XYZ)[1]){
+    prin_curve <- principal_curve(XYZ[-point,],   df=50,smoother="smooth_spline")
+    dist <- dist + project_to_curve(x=XYZ, s=prin_curve$s)$dist
+  }
+
+dist
+
+```
+
+Because  all points are fairly close to each other so if one point is removed, the distances are still similar to if it was optimaly fitted with all the points.
+
+## Part B
+
+```{r}
+
+# ploting 1 digit
+plot.zip <- function(x,use.first=FALSE,...){
+  x<-as.numeric(x)
+  if (use.first){
+    x.mat <- matrix(x,16,16)
+  }else{
+    x.mat <- matrix(x[-1],16,16)
+  }
+  image(1:16,1:16,x.mat[,16:1],
+        col=gray(seq(1,0,l=12)),...)
+  invisible(
+    if (!use.first){
+      title(x[1])
+    }else{
+    }
+  )  
+  #col=gray(seq(1,0,l=2)))
+}
+```
+
+
+### plotting and extracting zeros
+
+```{r}
+zip.train <- read.table("zip.train")
+dim(zip.train)
+zero_dat <- zip.train[which(zip.train[,1]==0),2:(16*16+1)]
+
+dim(zero_dat)
+
+plot.zip(zero_dat[4,], use.first = TRUE)
+```
+
+
+## 2 Local MDS for ZERO digits
+
+```{r}
+library(stops)
+#need to install java 64bit in order to run it...
+```
+
+### a
+Look for a 2-dimensional (q=2) configuration of the data using parameters k=5 and τ=0.05 in lmds function. Do the scatterplot of the obtained 2-dimensional configuration.
+
+```{r}
+#i need to create a distance matrix somehowe???
+
+dist_zero <- dist(zero_dat)
+k <- 5
+tau <- .05
+q<-2 # 2-dim config
+
+conf0 <- stats::cmdscale(dist_zero, k=q)
+lmds <- lmds(as.matrix(dist_zero), init=conf0, ndim=q, k=k, tau=tau, itmax = 1000)
+
+lmds_2 <- lmds(as.matrix(dist(zero_dat)), ndim=2, k=5, tau=0.05)
+
+```
+```{r}
+rownames(lmds$conf) <- 1:dim(lmds$conf)[1]
+rownames(lmds_2$conf) <- 1:dim(lmds_2$conf)[1]
+
+
+plot(lmds)
+
+
+plot(lmds_2)
+
+```
+
+### b
+In the previous scatterplot, select a few points (9 points, for instance) located in such a way that they cover the variability of all the points in the scatterplot. Then use the function plot.zip to plot the ZERO digits corresponding to the selected points. The images you are plotting should allows you to give an interpretation of the 2 coordinates obtained by Local MDS (observe how the shape of ZEROs changes when moving along each directions of the scatterplot).
+
+```{r}
+
+ok_index <- lmds$conf[,2]<5 & lmds$conf[,2]>-5
+
+first_axis <- as.numeric(names(sort(lmds$conf[ok_index,1])[c(1,round(seq(0.2,1,0.2)*sum(ok_index)))]))
+
+
+par(mfrow = c(2,3))
+par(mar = c(4, 1, 1, 0))
+for (pic in first_axis){
+  
+  plot.zip(zero_dat[pic,], use.first = TRUE)
+  title(paste(round(lmds$conf[pic,1])))
+}
+
+
+
+ok_index_2 <- lmds$conf[,1]<8 & lmds$conf[,1]>-8
+
+second_axis <- as.numeric(names(sort(lmds$conf[ok_index_2,2])[c(1,round(seq(0.2,1,0.2)*sum(ok_index_2)))]))
+
+
+par(mfrow = c(2,3))
+par(mar = c(4, 1, 1, 0))
+for (pic in second_axis){
+  
+  plot.zip(zero_dat[pic,], use.first = TRUE)
+  title(paste(round(lmds$conf[pic,2])))
+}
+par(mfrow = c(1,1))
+par(mar = c(4, 2, 1, 1))
+plot(lmds$conf,col="black")
+points(lmds$conf[ok_index,],col="yellow")
+points(lmds$conf[ok_index_2,],col="yellow")
+points(lmds$conf[first_axis,],col="blue", pch =2)
+points(lmds$conf[second_axis,],col="red", pch =2)
+
+```
+
+
+### c
+Use the local continuity meta criteria to select the tuning parameters k and τ in Local MDS for ZERO digits. Then describe graphically the low dimensional configuration corresponding to the optimal parameters. Indication: As tentative values for k use c(5,10,50), and for τ use c(.1,.5,1).
+
+```{r}
+LCMC <- function(D1,D2,Kp){
+  D1 <- as.matrix(D1)
+  D2 <- as.matrix(D2)
+  n <- dim(D1)[1]
+  N.Kp.i <- numeric(n)
+  for (i in 1:n){
+    N1.i <- sort.int(D1[i,],index.return = TRUE)$ix[1:Kp]
+    N2.i <- sort.int(D2[i,],index.return = TRUE)$ix[1:Kp]
+    N.Kp.i[i] <- length(intersect(N1.i, N2.i))
+  }
+  N.Kp<-mean(N.Kp.i)
+  M.Kp.adj <- N.Kp/Kp - Kp/(n-1)
+  
+  return(list(N.Kp.i=N.Kp.i, M.Kp.adj=M.Kp.adj))
+}
+
+D1 <- dist(zero_dat)
+
+
+q<-2 # 2-dim config
+
+
+Kp <- 10
+
+conf0 <- stats::cmdscale(D1,k=q)
+
+K <- c(5,10,50)
+tau <- c(.1,.5,1)
+
+LC <- matrix(0,nrow=length(K),ncol=length(tau))
+lmds.k.tau <- array(vector("list",1),dim=dim(LC))
+
+for (i in 1:length(K)){
+  for (j in 1:length(tau)){
+    lmds.k.tau[[i,j]] <- lmds(as.matrix(D1), init=conf0, 
+                              ndim=q, k=K[i], tau=tau[j], itmax=1000)$conf
+    D2.k.tau <- dist(lmds.k.tau[[i,j]])
+    LC[i,j] <- LCMC(D1,D2.k.tau,Kp)$M.Kp.adj
+    #print(c(i,j,LC[i,j]))
+  }
+}
+LC_lmds <- LC
+
+ij.max <- arrayInd(which.max(LC_lmds),.dim=dim(LC_lmds))
+k.max <- K[ij.max[1]] 
+tau.max <- tau[ij.max[2]] 
+lmds.max <- lmds.k.tau[[ij.max[1],ij.max[2]]]
+
+print(paste0("k.max=",k.max,"; tau.max=",tau.max))
+
+```
+```{r}
+par(mfrow = c(1,1))
+par(mar = c(4, 2, 1,1))
+#pairs(cbind(zero_dat,locMDS=lmds.max[,1]))
+plot(lmds.max,col="black")
+```
+
+
+
+## 3 ISOMAP for ZERO digits
+
+### a
+Look for a 2-dimensional (q=2) configuration of the data using parameter k=5 in function isomap from package vegan. Do the scatterplot of the obtained 2-dimensional configuration.
+```{r}
+library(vegan)
+D1 <- dist(zero_dat)
+
+iso_obj <- isomap(D1,ndim=2, k=5)
+```
+
+```{r}
+plot(iso_obj)
+```
+### b
+In the previous scatterplot, select a few points (9 points, for instance) located in such a way that they cover the variability of all the points in the scatterplot. Then use the function plot.zip to plot the ZERO digits corresponding to the selected points. The images you are plotting should allows you to give an interpretation of the 2 coordinates obtained by ISOMAP (observe how the shape of ZEROs changes when moving along each directions of the scatterplot).
+
+```{r}
+rownames(iso_obj$points) <- 1:dim(iso_obj$points)[1]
+
+ok_index <- iso_obj$points[,2]<5 & iso_obj$points[,2]>-5
+
+first_axis <- as.numeric(names(sort(iso_obj$points[ok_index,1])[c(1,round(seq(0.2,1,0.2)*sum(ok_index)))]))
+
+
+par(mfrow = c(2,3))
+par(mar = c(4, 1, 1, 0))
+for (pic in first_axis){
+  
+  plot.zip(zero_dat[pic,], use.first = TRUE)
+  title(paste(round(iso_obj$points[pic,1])))
+}
+
+
+
+ok_index_2 <- iso_obj$points[,1]<20 & iso_obj$points[,1]>0
+
+second_axis <- as.numeric(names(sort(iso_obj$points[ok_index_2,2])[c(1,round(c(0.08,0.17,0.4,0.7,1)*sum(ok_index_2)))]))
+
+
+par(mfrow = c(2,3))
+par(mar = c(4, 1, 1, 0))
+for (pic in second_axis){
+  
+  plot.zip(zero_dat[pic,], use.first = TRUE)
+  title(paste(round(iso_obj$points[pic,2])))
+}
+par(mfrow = c(1,1))
+par(mar = c(4, 2, 1, 1))
+plot(iso_obj$points,col="black")
+points(iso_obj$points[ok_index,],col="yellow")
+points(iso_obj$points[ok_index_2,],col="yellow")
+points(iso_obj$points[first_axis,],col="blue", pch =2)
+points(iso_obj$points[second_axis,],col="red", pch =2)
+
+
+```
+
+### c
+Use the local continuity meta criteria to select the tuning parameter k in ISOMAP for ZERO digits. Then describe graphically the low dimensional configuration corresponding to the optimal parameter.
+Indication: As tentative values for k use c(5,10,50).
+
+
+```{r}
+D1 <- dist(zero_dat)
+
+
+q<-2 # 2-dim config
+
+
+Kp <- 10
+
+
+K <- c(5,10,50)
+
+LC <- vector(mode = "logical",length =length(K))
+iso.k <- array(vector("list",1))
+
+for (i in 1:length(K)){
+    iso.k[[i]] <- isomap(D1, ndim=q, k=K[i])$points
+    D2.k <- dist(iso.k[[i]])
+    LC[i] <- LCMC(D1,D2.k,Kp)$M.Kp.adj
+    #print(c(i,j,LC[i,j]))
+}
+LC_iso <- LC
+ij.max <- which.max(LC_iso)
+k.max <- K[ij.max[1]] 
+
+iso.max <- iso.k[[ij.max[1]]]
+
+print(paste0("k.max=",k.max))
+
+```
+## 4. t-SNE for ZERO digits
+
+### a
+Look for a 2-dimensional (q=2) configuration of the data using parameters perplexity=40 and theta=0 in Rtsne function. Do the scatterplot of the obtained 2-dimensional configuration.
+```{r}
+library(Rtsne)
+
+rtsne_obj <- Rtsne(D1, dims=2, perplexity = 40, theta = 0)
+
+
+```
+
+
+```{r}
+plot(rtsne_obj$Y)
+```
+### b
+In the previous scatterplot, select a few points (9 points, for instance) located in such a way that they cover the variability of all the points in the scatterplot. Then use the function plot.zip to plot the ZERO digits corresponding to the selected points. The images you are plotting should allows you to give an interpretation of the 2 coordinates obtained by t-SNE (observe how the shape of ZEROs changes when moving along each directions of the scatterplot).
+
+```{r}
+rownames(rtsne_obj$Y) <- 1:dim(rtsne_obj$Y)[1]
+
+ok_index <- rtsne_obj$Y[,2]<5 & rtsne_obj$Y[,2]>-5
+
+first_axis <- as.numeric(names(sort(rtsne_obj$Y[ok_index,1])[c(1,round(seq(0.2,1,0.1)*sum(ok_index)))]))
+
+
+par(mfrow = c(2,3))
+par(mar = c(4, 1, 1, 0))
+for (pic in first_axis){
+  
+  plot.zip(zero_dat[pic,], use.first = TRUE)
+  title(paste(round(rtsne_obj$Y[pic,1])))
+}
+
+
+
+ok_index_2 <- rtsne_obj$Y[,1]<8 & rtsne_obj$Y[,1]>-8
+
+second_axis <- as.numeric(names(sort(rtsne_obj$Y[ok_index_2,2])[c(1,round(seq(0.2,1,0.1)*sum(ok_index_2)))]))
+
+
+par(mfrow = c(2,3))
+par(mar = c(4, 1, 1, 0))
+for (pic in second_axis){
+  
+  plot.zip(zero_dat[pic,], use.first = TRUE)
+  title(paste(round(rtsne_obj$Y[pic,2])))
+}
+par(mfrow = c(1,1))
+par(mar = c(4, 2, 1, 1))
+plot(rtsne_obj$Y,col="blue")
+points(rtsne_obj$Y[ok_index,],col="yellow")
+points(rtsne_obj$Y[ok_index_2,],col="yellow")
+points(rtsne_obj$Y[first_axis,],col="green", pch =2)
+points(rtsne_obj$Y[second_axis,],col="red", pch =2)
+
+```
+### c
+Use the local continuity meta criteria to select the tuning parameter perplexity in t-SNE for ZERO digits (use q=2 and theta=0). Then describe graphically the low dimensional configuration corresponding to the optimal parameter. Indication: As tentative values for perplexity use c(10,20,40).
+
+```{r}
+
+D1 <- dist(zero_dat)
+q<-2 # 2-dim config
+theta <- 0
+
+
+Kp <- 10
+
+
+per <- c(10,20,40)
+
+LC <- vector(mode = "logical",length =length(per))
+rtsne.per <- array(vector("list",1))
+
+# Rtsne(zero_dat, dims=2, perplexity = 40, theta = 0)
+for (i in 1:length(per)){
+    rtsne.per[[i]] <- Rtsne(D1,dims=2, theta=0, perplexity=per[i], pca=FALSE)$Y
+    D2.rtsne <- dist(rtsne.per[[i]])
+    LC[i] <- LCMC(D1,D2.rtsne,Kp)$M.Kp.adj
+    #print(c(i,j,LC[i,j]))
+}
+
+LC_rtsne <- LC
+ij.max <- which.max(LC_rtsne)
+tent.max <- per[ij.max[1]] 
+
+rtsne.max <- rtsne.per[[ij.max[1]]]
+
+print(paste0("tentative.max=",tent.max))
+```
+## 5. Compare Local MDS, ISOMAP and t-SNE for ZERO digits
+
+### a
+Compare graphically the dimensions of the 2-dimensional configurations you have obtained by Local MDS, ISOMAP and t-SNE for ZERO digits. Indication: Use the function pairs applied to a 6-dimensional matrix.
+```{r}
+library(GGally)
+library(ggplot2)
+par(mar = c(0, 0, 0, 0))
+ggpairs(as.data.frame(cbind(lmds.max,iso.max,rtsne.max[,2],rtsne.max[,1])))
+rtsne_obj_2$Y
+ggpairs(as.data.frame(cbind(lmds.max,iso.max,rtsne_obj$Y)))
+```
+
+### b
+Which method have produced the 2-dimensional configurations with the largest value of the local continuity meta criteria?
+
+```{r}
+print(paste0("lmds LCMC value=",round(max(LC_lmds),2)))
+cat("\n")
+print(paste0("ISOmap LCMC value=",round(max(LC_iso),2)))
+cat("\n")
+print(paste0("Rtsne LCMC value=",round(max(LC_rtsne),2)))
+
+```
+
